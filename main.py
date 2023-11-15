@@ -7,14 +7,14 @@ SCREEN_WIDTH, SCREEN_HEIGHT = 1305, 660
 
 # Cores
 WHITE = (255, 255, 255)
-BLUE = (0, 0, 255)
-LIGHT_BLUE = (173, 216, 230)
-DARK_BLUE = (0, 0, 139)
+DARK_BLUE = (4, 58, 122)
+LIGHT_BLUE = (132, 189, 255)
+BLUE = (27, 91, 166)
 BLACK = (0, 0, 0)
 GRAY = (128, 128, 128)
 
 # Estados do Jogo
-MENU, LOADING, GAME_SETUP, GAME_PLAY, GAME_END = range(5)
+MENU, LOADING, GAME_SETUP, GAME_WAITING_FOR_OPPONENT, GAME_PLAY, GAME_END = range(6)
 
 # Inicialização do Pygame
 pygame.init()
@@ -35,6 +35,9 @@ SHIP_WIDTH = 40
 SHIP_HEIGHT = GRID_CELL_SIZE
 rotate_button_position = (SHIP_AREA[0], SHIP_AREA[1] + GRID_CELL_SIZE * (GRID_ROWS + 1))
 rotate_button_dimensions = (200, 50)
+PLAYER_BOARD_TOP_LEFT = GRID_TOP_LEFT
+ENEMY_BOARD_TOP_LEFT = ((SCREEN_WIDTH / 2) + 20, GRID_TOP_LEFT[1])
+
 
 
 class Button:
@@ -79,7 +82,7 @@ class Ship:
 
     def draw(self, win):
         for rect in self.rects:
-            pygame.draw.rect(win, (0, 0, 255), rect)
+            pygame.draw.rect(win, DARK_BLUE, rect)
 
     def rotate(self):
         self.horizontal = not self.horizontal
@@ -103,10 +106,11 @@ def draw_menu():
     screen.blit(title_text, title_rect)
     start_button.draw(screen)
 
+
     for event in pygame.event.get():
         if event.type == pygame.MOUSEBUTTONDOWN:
             if start_button.is_clicked(event.pos):
-                game_state = GAME_SETUP
+                game_state = LOADING
 
 
 def draw_loading():
@@ -140,12 +144,12 @@ def draw_loading():
         pygame.time.delay(100)  # Pequeno atraso para reduzir o uso da CPU
 
 
-def draw_grid():
+def draw_grid(board_top_left):
     font = pygame.font.Font(None, 36)
     for row in range(GRID_ROWS):
         for col in range(GRID_COLS):
-            rect = pygame.Rect(GRID_TOP_LEFT[0] + col * GRID_CELL_SIZE,
-                               GRID_TOP_LEFT[1] + row * GRID_CELL_SIZE,
+            rect = pygame.Rect(board_top_left[0] + col * GRID_CELL_SIZE,
+                               board_top_left[1] + row * GRID_CELL_SIZE,
                                GRID_CELL_SIZE, GRID_CELL_SIZE)
             pygame.draw.rect(screen, BLACK, rect, 1)
             if row == 0:
@@ -154,6 +158,7 @@ def draw_grid():
             if col == 0:
                 letter_text = font.render(chr(65 + row), True, BLACK)
                 screen.blit(letter_text, (rect.x - 30, rect.y + 10))
+
 
 def initialize_ships():
     # Define o espaçamento entre navios do mesmo tipo e entre tipos diferentes
@@ -196,9 +201,15 @@ for ship in ships:
     ship.positioned = False
 
 
-def draw_ships():
+def draw_ships(ships, board_top_left):
     for ship in ships:
-        ship.draw(screen)
+        if ship.positioned:  # Certifique-se de desenhar apenas navios posicionados
+            for rect in ship.rects:
+                # Desenha o retângulo do navio ajustado para a posição do tabuleiro
+                ship_rect = pygame.Rect(board_top_left[0] + (rect.x - board_top_left[0]),
+                                        board_top_left[1] + (rect.y - board_top_left[1]),
+                                        rect.width, rect.height)
+                pygame.draw.rect(screen, DARK_BLUE, ship_rect)
 
 
 def draw_continue_button(enabled=True):
@@ -221,11 +232,13 @@ def draw_continue_button(enabled=True):
     text_rect = text.get_rect(center=button_rect.center)
     screen.blit(text, text_rect)
 
+    return button_rect
 
-def draw_game_setup():
+
+def draw_game_setup(board_top_left):
     screen.fill(LIGHT_BLUE)
-    draw_grid()
-    draw_ships()
+    draw_grid(board_top_left)
+    draw_ships(ships, board_top_left)
     draw_continue_button(True)
 
 def is_valid_position(ship, ships):
@@ -299,7 +312,7 @@ def draw_rotate_button(screen, enabled=True):
     font = pygame.font.Font(None, 36)
     button_color = BLUE
     margin = 20  # Margem em relação ao lado direito da tela
-    button_width = 180  # Largura menor para o botão de rotação
+    button_width = 250  # Largura menor para o botão de rotação
     button_height = 50  # Altura do botão
 
     # Posição x e y mantendo as margens
@@ -318,6 +331,120 @@ def draw_rotate_button(screen, enabled=True):
 
 
 rotate_button_rect = None
+
+
+def draw_waiting_for_opponent_screen():
+    screen.fill(LIGHT_BLUE)  # Define a cor de fundo da tela de espera
+    draw_grid()  # Desenha o tabuleiro
+    draw_ships()  # Desenha os navios na posição final do GAME_SETUP
+
+    # Adicione o texto de espera à direita do tabuleiro
+    font = pygame.font.Font(None, 36)
+    waiting_text = font.render('Esperando adversário...', True, BLACK)
+    text_rect = waiting_text.get_rect(center=(SCREEN_WIDTH/2 + SCREEN_WIDTH/4, SCREEN_HEIGHT/2))
+    screen.blit(waiting_text, text_rect)
+
+
+def draw_game_play_screen(ships, player_attacks, enemy_attacks):
+    # Limpa a tela
+    screen.fill(LIGHT_BLUE)
+
+    # Desenha o tabuleiro do jogador com os navios e os ataques do inimigo
+    draw_grid(PLAYER_BOARD_TOP_LEFT)
+    draw_ships(ships, PLAYER_BOARD_TOP_LEFT)
+    draw_hits_and_misses(enemy_attacks, PLAYER_BOARD_TOP_LEFT)
+
+    # Desenha o tabuleiro do inimigo sem os navios, mas com os ataques do jogador
+    draw_grid(ENEMY_BOARD_TOP_LEFT)
+    draw_hits_and_misses(player_attacks, ENEMY_BOARD_TOP_LEFT)
+
+
+def handle_board_click(pos, board_top_left, attacks):
+    grid_x = (pos[0] - board_top_left[0]) // GRID_CELL_SIZE
+    grid_y = (pos[1] - board_top_left[1]) // GRID_CELL_SIZE
+
+    # Verifica se o clique foi dentro do tabuleiro
+    if 0 <= grid_x < GRID_COLS and 0 <= grid_y < GRID_ROWS:
+        if (grid_x, grid_y) not in attacks:  # Não pode atacar a mesma célula duas vezes
+            # Determina se é um hit ou miss
+            is_hit = enemy_board[grid_y][grid_x] == 'ship'  # Suponha que você tenha uma representação do tabuleiro inimigo
+            attacks[(grid_x, grid_y)] = 'hit' if is_hit else 'miss'
+            return is_hit
+    return None
+
+
+player_attacks = {}  # Registra os ataques do jogador ao tabuleiro inimigo
+enemy_attacks = {}  # Registra os ataques do inimigo ao tabuleiro do jogador
+enemy_board = [[0] * GRID_COLS for _ in range(GRID_ROWS)]
+hits = set()  # Acertos no tabuleiro do adversário
+misses = set()  # Erros no tabuleiro do adversário
+
+
+def draw_hits_and_misses(attacks, board_top_left):
+    for (x, y), result in attacks.items():
+        rect = pygame.Rect(board_top_left[0] + x * GRID_CELL_SIZE,
+                           board_top_left[1] + y * GRID_CELL_SIZE,
+                           GRID_CELL_SIZE, GRID_CELL_SIZE)
+        if result == 'hit':
+            pygame.draw.line(screen, (255, 0, 0), rect.topleft, rect.bottomright, 3)
+            pygame.draw.line(screen, (255, 0, 0), rect.bottomleft, rect.topright, 3)
+        elif result == 'miss':
+            pygame.draw.rect(screen, (0, 0, 255), rect)
+
+
+def register_attack(pos, board_top_left, attacks):
+    # Converte a posição do clique para coordenadas do grid
+    grid_x = (pos[0] - board_top_left[0]) // GRID_CELL_SIZE
+    grid_y = (pos[1] - board_top_left[1]) // GRID_CELL_SIZE
+
+    # Verifica se o clique foi dentro do tabuleiro do inimigo
+    if 0 <= grid_x < GRID_COLS and 0 <= grid_y < GRID_ROWS:
+        if (grid_x, grid_y) not in attacks:  # Não pode atacar a mesma célula duas vezes
+            # Simula um ataque
+            # TODO: Adicionar a lógica para determinar se o ataque acertou um navio inimigo
+            is_hit = False  # Determinar isso com base na lógica do seu jogo
+            attacks[(grid_x, grid_y)] = 'hit' if is_hit else 'miss'
+
+game_result = 'defeat'
+
+
+def draw_game_end_screen(result):
+    screen.fill(LIGHT_BLUE)  # Define a cor de fundo para a tela de final de jogo
+
+    # Define a fonte e o tamanho do texto
+    font = pygame.font.Font(None, 90)
+    if result == 'victory':
+        end_text = font.render('VITÓRIA!', True, (2,93,0))
+    else:
+        end_text = font.render('DERROTA...', True, (255, 8, 8))
+
+    # Centraliza o texto na tela
+    text_rect = end_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 3))
+    screen.blit(end_text, text_rect)
+
+    # Calcula a posição dos botões
+    button_width = 200
+    button_height = 50
+    button_spacing = 30  # Espaçamento entre os botões
+    total_button_width = (button_width * 2) + button_spacing
+    first_button_x = (SCREEN_WIDTH - total_button_width) // 2
+    button_y = SCREEN_HEIGHT // 2 + 100
+
+    # Define os botões
+    menu_button = Button("Menu Principal", button_width, button_height, (first_button_x, button_y), 36, BLUE, WHITE)
+    revanche_button = Button("Revanche", button_width, button_height,
+                             (first_button_x + button_width + button_spacing, button_y), 36, BLUE, WHITE)
+
+    # Desenha os botões na tela
+    menu_button.draw(screen)
+    revanche_button.draw(screen)
+
+    return menu_button, revanche_button  # Retorna os botões para verificar os cliques fora desta função
+
+def reset_ship_positions(ships):
+    for ship in ships:
+        ship.set_position(ship.original_position)
+        ship.positioned = False
 
 # Loop Principal
 while True:
@@ -341,6 +468,28 @@ while True:
                         # Se não for válida, desfaz a rotação
                         selected_ship.rotate()
 
+            if event.type == pygame.MOUSEBUTTONDOWN and button_continue_rect.collidepoint(event.pos):
+                # O jogador pressionou o botão "Continuar", muda para a tela de espera do adversário
+                game_state = GAME_WAITING_FOR_OPPONENT
+
+        if game_state == GAME_PLAY:
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                pos = pygame.mouse.get_pos()
+                # Verifica se o clique foi no tabuleiro do inimigo
+                if ENEMY_BOARD_TOP_LEFT[0] <= pos[0] <= ENEMY_BOARD_TOP_LEFT[0] + GRID_CELL_SIZE * GRID_COLS and \
+                        ENEMY_BOARD_TOP_LEFT[1] <= pos[1] <= ENEMY_BOARD_TOP_LEFT[1] + GRID_CELL_SIZE * GRID_ROWS:
+                    register_attack(pos, ENEMY_BOARD_TOP_LEFT, player_attacks)
+
+        if game_state == GAME_END:
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                pos = pygame.mouse.get_pos()
+                if menu_button.is_clicked(pos):
+                    reset_ship_positions(ships)  # Reseta a posição dos navios
+                    game_state = MENU  # Volta para o menu principal
+                elif revanche_button.is_clicked(pos):
+                    reset_ship_positions(ships)  # Reseta a posição dos navios
+                    game_state = GAME_SETUP  # Inicia uma nova partida
+
     screen.fill(LIGHT_BLUE)
 
     if game_state == MENU:
@@ -348,7 +497,7 @@ while True:
     elif game_state == LOADING:
         draw_loading()
     elif game_state == GAME_SETUP:
-        draw_game_setup()
+        draw_game_setup(PLAYER_BOARD_TOP_LEFT)
 
         if selected_ship and selected_ship.selected:
             # Obtenha a posição atual do mouse
@@ -361,20 +510,23 @@ while True:
 
         button_continue = all_ships_positioned(ships)
 
-        draw_grid()  # Desenha o tabuleiro
-        draw_continue_button(button_continue)  # Desenha o botão "CONTINUAR"
+        draw_grid(PLAYER_BOARD_TOP_LEFT)  # Desenha o tabuleiro
+        button_continue_rect = draw_continue_button(button_continue)  # Desenha o botão "CONTINUAR"
         rotate_button_rect = draw_rotate_button(screen, selected_ship is not None and selected_ship.selected)
 
         # Redesenha todos os navios após movê-los
         for ship in ships:
             ship.draw(screen)
 
+    elif game_state == GAME_WAITING_FOR_OPPONENT:
+        draw_waiting_for_opponent_screen()
 
     elif game_state == GAME_PLAY:
-        # Tela do jogo
-        pass
+        draw_game_play_screen(ships, player_attacks, enemy_attacks)
+
     elif game_state == GAME_END:
-        # Tela de fim de jogo
-        pass
+        menu_button, revanche_button = draw_game_end_screen(game_result)
+
+
 
     pygame.display.flip()
