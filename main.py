@@ -1,0 +1,380 @@
+import pygame
+import sys
+import time
+
+# Constantes
+SCREEN_WIDTH, SCREEN_HEIGHT = 1305, 660
+
+# Cores
+WHITE = (255, 255, 255)
+BLUE = (0, 0, 255)
+LIGHT_BLUE = (173, 216, 230)
+DARK_BLUE = (0, 0, 139)
+BLACK = (0, 0, 0)
+GRAY = (128, 128, 128)
+
+# Estados do Jogo
+MENU, LOADING, GAME_SETUP, GAME_PLAY, GAME_END = range(5)
+
+# Inicialização do Pygame
+pygame.init()
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+pygame.display.set_caption('Batalha Naval')
+
+# Variáveis do Jogo
+game_state = MENU
+button_continue = False
+
+# Dimensões e posições
+GRID_TOP_LEFT = (50, 50)
+GRID_CELL_SIZE = 50
+GRID_ROWS = 11
+GRID_COLS = 11
+SHIP_AREA = (GRID_TOP_LEFT[0] + GRID_CELL_SIZE*GRID_COLS + 50, GRID_TOP_LEFT[1])
+SHIP_WIDTH = 40
+SHIP_HEIGHT = GRID_CELL_SIZE
+rotate_button_position = (SHIP_AREA[0], SHIP_AREA[1] + GRID_CELL_SIZE * (GRID_ROWS + 1))
+rotate_button_dimensions = (200, 50)
+
+
+class Button:
+    def __init__(self, text, width, height, pos, font_size, bg_color, fg_color):
+        self.text = text
+        self.width = width
+        self.height = height
+        self.position = pos
+        self.font_size = font_size
+        self.bg_color = bg_color
+        self.fg_color = fg_color
+        self.rect = pygame.Rect(pos[0], pos[1], width, height)
+
+    def draw(self, win):
+        pygame.draw.rect(win, self.bg_color, self.rect)
+        font = pygame.font.Font(None, self.font_size)
+        text = font.render(self.text, True, self.fg_color)
+        text_rect = text.get_rect(center=self.rect.center)
+        win.blit(text, text_rect)
+
+    def is_clicked(self, pos):
+        return self.rect.collidepoint(pos)
+
+
+class Ship:
+    def __init__(self, size, position, horizontal=True):
+        self.size = size
+        self.selected = False
+        self.position = position
+        self.positioned = False
+        self.original_position = position
+        self.horizontal = horizontal
+        self.rects = self.create_rects()
+
+    def create_rects(self):
+        rects = []
+        for i in range(self.size):
+            x = self.position[0] + (i * GRID_CELL_SIZE if self.horizontal else 0)
+            y = self.position[1] + (i * GRID_CELL_SIZE if not self.horizontal else 0)
+            rects.append(pygame.Rect(x, y, GRID_CELL_SIZE, GRID_CELL_SIZE))
+        return rects
+
+    def draw(self, win):
+        for rect in self.rects:
+            pygame.draw.rect(win, (0, 0, 255), rect)
+
+    def rotate(self):
+        self.horizontal = not self.horizontal
+        self.rects = self.create_rects()
+
+    def set_position(self, pos):
+        self.position = pos
+        self.original_position = pos
+        self.rects = self.create_rects()
+
+def draw_menu():
+    global game_state
+
+    font = pygame.font.Font(None, 54)
+    title_text = font.render('Batalha Naval', True, (0, 0, 0))
+    title_rect = title_text.get_rect(center=(SCREEN_WIDTH / 2, 100))
+
+    start_button = Button("Iniciar", 150, 50, (SCREEN_WIDTH / 2 - 75, 250), 36, (0, 128, 0), (255, 255, 255))
+
+    screen.fill(LIGHT_BLUE)
+    screen.blit(title_text, title_rect)
+    start_button.draw(screen)
+
+    for event in pygame.event.get():
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if start_button.is_clicked(event.pos):
+                game_state = GAME_SETUP
+
+
+def draw_loading():
+    font = pygame.font.Font(None, 36)
+    text = font.render('Procurando adversário...', True, (0, 0, 0))
+    text_rect = text.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 30))
+
+    loading_dots = ''
+    max_dots = 3
+    start_time = time.time()
+    while game_state == LOADING:
+        screen.fill(LIGHT_BLUE)
+        screen.blit(text, text_rect)
+
+        # Animação de pontos de carregamento
+        current_time = time.time()
+        if current_time - start_time >= 0.5:  # Atualiza os pontos a cada 0.5 segundos
+            loading_dots = loading_dots + '.' if len(loading_dots) < max_dots else ''
+            start_time = current_time
+
+        loading_dots_text = font.render(loading_dots, True, (0, 0, 0))
+        loading_dots_rect = loading_dots_text.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2))
+        screen.blit(loading_dots_text, loading_dots_rect)
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+
+        pygame.display.flip()
+        pygame.time.delay(100)  # Pequeno atraso para reduzir o uso da CPU
+
+
+def draw_grid():
+    font = pygame.font.Font(None, 36)
+    for row in range(GRID_ROWS):
+        for col in range(GRID_COLS):
+            rect = pygame.Rect(GRID_TOP_LEFT[0] + col * GRID_CELL_SIZE,
+                               GRID_TOP_LEFT[1] + row * GRID_CELL_SIZE,
+                               GRID_CELL_SIZE, GRID_CELL_SIZE)
+            pygame.draw.rect(screen, BLACK, rect, 1)
+            if row == 0:
+                num_text = font.render(str(col + 1), True, BLACK)
+                screen.blit(num_text, (rect.x + 15, rect.y - 30))
+            if col == 0:
+                letter_text = font.render(chr(65 + row), True, BLACK)
+                screen.blit(letter_text, (rect.x - 30, rect.y + 10))
+
+def initialize_ships():
+    # Define o espaçamento entre navios do mesmo tipo e entre tipos diferentes
+    horizontal_spacing = 80
+    vertical_spacing = 60
+
+    # Posição inicial para o primeiro navio
+    start_x = SHIP_AREA[0]
+    start_y = SHIP_AREA[1]
+
+    # Cria uma lista para armazenar os navios
+    ships = []
+
+    # Posições iniciais de cada tipo de navio
+    positions = {
+        4: (start_x, start_y),
+        3: (start_x, start_y + vertical_spacing),
+        2: (start_x, start_y + 2 * vertical_spacing),
+        1: (start_x, start_y + 3 * vertical_spacing)
+    }
+
+    # Tamanhos dos navios e quantas vezes cada um aparece
+    ship_sizes = {4: 1, 3: 2, 2: 3, 1: 4}
+
+    for size, count in ship_sizes.items():
+        for i in range(count):
+            position = positions[size][0] + i * (size * 30 + horizontal_spacing), positions[size][1]
+            ship = Ship(size, position, horizontal=True)
+            ships.append(ship)
+
+    for ship in ships:
+        ship.original_position = ship.position  # Armazena a posição inicial
+    return ships
+
+
+ships = initialize_ships()
+original_positions = {ship: ship.position for ship in ships}
+
+for ship in ships:
+    ship.positioned = False
+
+
+def draw_ships():
+    for ship in ships:
+        ship.draw(screen)
+
+
+def draw_continue_button(enabled=True):
+    font = pygame.font.Font(None, 36)
+    button_color = BLUE if enabled else GRAY
+    margin = 20  # Margem em relação ao lado direito da tela
+    button_width = SCREEN_WIDTH - SHIP_AREA[0] - margin * 2  # Largura do botão com base na largura da tela e margens
+    button_height = 50  # Altura do botão
+
+    # Calcula a posição x mantendo a margem à direita
+    button_x = SHIP_AREA[0] + margin
+    # Mantém uma margem na parte inferior da tela para a posição y do botão
+    button_y = GRID_TOP_LEFT[1] + GRID_CELL_SIZE * GRID_ROWS - button_height
+
+    button_rect = pygame.Rect(button_x, button_y, button_width, button_height)
+    pygame.draw.rect(screen, button_color, button_rect)
+
+    # Renderiza o texto "CONTINUAR" centrado no botão
+    text = font.render('CONTINUAR', True, WHITE if enabled else BLACK)
+    text_rect = text.get_rect(center=button_rect.center)
+    screen.blit(text, text_rect)
+
+
+def draw_game_setup():
+    screen.fill(LIGHT_BLUE)
+    draw_grid()
+    draw_ships()
+    draw_continue_button(True)
+
+def is_valid_position(ship, ships):
+    # Esta função assume que o 'ship' já está posicionado onde o jogador quer colocá-lo.
+    for rect in ship.rects:
+        # Verifica se o navio está dentro dos limites do tabuleiro
+        if not (GRID_TOP_LEFT[0] <= rect.x < GRID_TOP_LEFT[0] + GRID_CELL_SIZE * GRID_COLS and
+                GRID_TOP_LEFT[1] <= rect.y < GRID_TOP_LEFT[1] + GRID_CELL_SIZE * GRID_ROWS):
+            return False
+
+        # Verifica a proximidade de outros navios
+        for other_ship in ships:
+            if other_ship == ship or not other_ship.positioned:
+                continue  # Ignora a verificação do próprio navio e dos navios não posicionados
+            for other_rect in other_ship.rects:
+                # Verifica se algum rect do 'ship' está em um dos rects inflados de 'other_ship'
+                if rect.colliderect(other_rect.inflate(GRID_CELL_SIZE, GRID_CELL_SIZE)):
+                    return False
+
+    return True
+
+
+def snap_to_grid(pos):
+    grid_x = ((pos[0] - GRID_TOP_LEFT[0]) // GRID_CELL_SIZE) * GRID_CELL_SIZE + GRID_TOP_LEFT[0]
+    grid_y = ((pos[1] - GRID_TOP_LEFT[1]) // GRID_CELL_SIZE) * GRID_CELL_SIZE + GRID_TOP_LEFT[1]
+    return grid_x, grid_y
+
+def all_ships_positioned(ships):
+    return all(ship.positioned for ship in ships)
+
+
+def handle_ship_placement(event, ships, selected_ship, original_positions):
+    if event.type == pygame.MOUSEBUTTONDOWN:
+        for ship in ships:
+            # Verifica se o clique foi em cima de algum dos rects do navio
+            if any(rect.collidepoint(event.pos) for rect in ship.rects):
+                selected_ship = ship
+                selected_ship.selected = True
+                # Salva a posição original do navio
+                original_positions[ship] = ship.position
+                break
+
+    elif event.type == pygame.MOUSEBUTTONUP and selected_ship:
+        selected_ship.selected = False
+        # Encaixa o navio na grade mais próxima do tabuleiro
+        ship_center = selected_ship.rects[0].center  # Pega o centro do primeiro rect como referência
+        new_position = snap_to_grid(ship_center)
+        selected_ship.set_position(new_position)
+        if not is_valid_position(selected_ship, ships):
+            # Posição inválida, retorna o navio para sua posição original fora do tabuleiro
+            selected_ship.set_position(original_positions[selected_ship])
+            selected_ship.positioned = False  # O navio não está corretamente posicionado
+        else:
+            selected_ship.positioned = True  # O navio está corretamente posicionado
+        selected_ship = None
+
+    elif event.type == pygame.MOUSEMOTION and selected_ship and selected_ship.selected:
+        # Segue o movimento do mouse
+        mouse_x, mouse_y = event.pos
+        offset_x = mouse_x - selected_ship.rects[0].width // 2
+        offset_y = mouse_y - selected_ship.rects[0].height // 2
+        selected_ship.set_position((offset_x, offset_y))
+
+    return selected_ship
+
+
+selected_ship = None
+
+
+def draw_rotate_button(screen, enabled=True):
+    font = pygame.font.Font(None, 36)
+    button_color = BLUE
+    margin = 20  # Margem em relação ao lado direito da tela
+    button_width = 180  # Largura menor para o botão de rotação
+    button_height = 50  # Altura do botão
+
+    # Posição x e y mantendo as margens
+    button_x = SHIP_AREA[0] + margin
+    button_y = GRID_TOP_LEFT[1] + GRID_CELL_SIZE * GRID_ROWS - button_height - margin - button_height  # Acima do botão CONTINUAR
+
+    button_rect = pygame.Rect(button_x, button_y, button_width, button_height)
+    pygame.draw.rect(screen, button_color, button_rect)
+
+    # Renderiza o texto "ROTACIONAR" centrado no botão
+    text = font.render('ROTACIONAR', True, WHITE)
+    text_rect = text.get_rect(center=button_rect.center)
+    screen.blit(text, text_rect)
+
+    return button_rect  # Retorna o retângulo do botão para detecção de clique
+
+
+rotate_button_rect = None
+
+# Loop Principal
+while True:
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            pygame.quit()
+            sys.exit()
+
+        if game_state == GAME_SETUP:
+
+            temp_ship = handle_ship_placement(event, ships, selected_ship, original_positions)
+            if temp_ship is not None:
+                selected_ship = temp_ship  # Atualiza o último navio selecionado
+
+            if rotate_button_rect and event.type == pygame.MOUSEBUTTONDOWN:
+                if rotate_button_rect.collidepoint(event.pos) and selected_ship:
+                    # Rotaciona o último navio selecionado
+                    selected_ship.rotate()
+                    # Verifica se a nova posição é válida após a rotação
+                    if not is_valid_position(selected_ship, ships):
+                        # Se não for válida, desfaz a rotação
+                        selected_ship.rotate()
+
+    screen.fill(LIGHT_BLUE)
+
+    if game_state == MENU:
+        draw_menu()
+    elif game_state == LOADING:
+        draw_loading()
+    elif game_state == GAME_SETUP:
+        draw_game_setup()
+
+        if selected_ship and selected_ship.selected:
+            # Obtenha a posição atual do mouse
+            mouse_x, mouse_y = pygame.mouse.get_pos()
+            # Centraliza o navio no cursor do mouse
+            offset_x = mouse_x - selected_ship.rects[0].width // 2
+            offset_y = mouse_y - selected_ship.rects[0].height // 2
+            # Atualiza a posição do navio para seguir o mouse
+            selected_ship.set_position((offset_x, offset_y))
+
+        button_continue = all_ships_positioned(ships)
+
+        draw_grid()  # Desenha o tabuleiro
+        draw_continue_button(button_continue)  # Desenha o botão "CONTINUAR"
+        rotate_button_rect = draw_rotate_button(screen, selected_ship is not None and selected_ship.selected)
+
+        # Redesenha todos os navios após movê-los
+        for ship in ships:
+            ship.draw(screen)
+
+
+    elif game_state == GAME_PLAY:
+        # Tela do jogo
+        pass
+    elif game_state == GAME_END:
+        # Tela de fim de jogo
+        pass
+
+    pygame.display.flip()
